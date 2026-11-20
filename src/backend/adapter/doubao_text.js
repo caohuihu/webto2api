@@ -60,9 +60,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
 
         // 1. 等待输入框加载 (改版后为 TipTap 富文本编辑器, 不再是 textarea)
         // 豆包 SPA 首屏渲染较慢, 且 goto 的 load 事件常因长连接而超时(已被容错),
-        // 此时输入框可能尚未渲染完成 → 放宽等待预算到 60s, 避免"未找到输入框"
+        // 此时输入框可能尚未渲染完成 → 放宽等待预算到 120s (与 waitTimeout 一致),
+        // 避免多实例资源争抢下的冷启动首帧渲染超过 60s 导致"未找到输入框"
         const inputLocator = page.locator('div[contenteditable="true"]').first();
-        await waitForInput(page, inputLocator, { click: false, timeout: 60000 });
+        await waitForInput(page, inputLocator, { click: false, timeout: 120000 });
 
         // 2. 选择模型 (改版后菜单项为 快速/专家, 兼容旧版 思考)
         const modelMenuName = MODEL_MENU_MAP[modelId] || MODEL_MENU_MAP['seed'];
