@@ -22,8 +22,10 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. 复制依赖文件、脚本和补丁目录，然后安装
-COPY package.json pnpm-lock.yaml ./
+# 2. 复制依赖文件、脚本、补丁目录和工作区配置，然后安装
+#    注意: pnpm-workspace.yaml (含 allowBuilds) 必须在 pnpm install 之前拷入,
+#    否则 pnpm 读不到 allowBuilds, 未审查的依赖构建脚本会触发 ERR_PNPM_IGNORED_BUILDS 硬错
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts/ ./scripts/
 COPY patches/ ./patches/
 RUN npm install -g pnpm && pnpm install --frozen-lockfile
