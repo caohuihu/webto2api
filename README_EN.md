@@ -110,18 +110,26 @@ This project supports both **source code execution** and **Docker containerized 
 > - Connection is possible via the virtual display section of the WebUI.
 > - **WebUI transmission is unencrypted. Please use SSH tunneling or HTTPS in public network environments.**
 
+> [!NOTE]
+> The image is built and pushed automatically to **GHCR**
+> (`ghcr.io/caohuihu/webto2api`) by GitHub Actions
+> (`.github/workflows/docker-publish.yml`). Login required:
+> `docker login ghcr.io` (GitHub account, or a PAT with `read:packages`).
+
 **Start with Docker CLI**
 ```bash
+docker login ghcr.io
 docker run -d --name webai-2api \
   -p 3000:3000 \
   -v "$(pwd)/data:/app/data" \
   --shm-size=2gb \
-  foxhui/webai-2api:latest
+  ghcr.io/caohuihu/webto2api:latest
 ```
 
-**Start with Docker Compose**
+**Start with Docker Compose (GHCR version)**
 ```bash
-docker-compose up -d
+docker login ghcr.io
+docker compose -f docker-compose.ghcr.yaml up -d
 ```
 
 ---

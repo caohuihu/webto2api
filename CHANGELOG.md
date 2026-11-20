@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-11-20
+
+### 🐛 Fixed
+- **适配器 (LMArena / DeepSeek / 豆包)**
+  - LMArena：输入框由 textarea 改为 TipTap 富文本 (`div[contenteditable="true"]`) 的适配
+  - DeepSeek：新版 DOM 适配 (`textarea[name="search"]`、`div.ds-toggle-button` 思考/搜索开关、`div[data-model-type]` 模式切换) + 文件/图片上传 + SSE 状态机重写
+  - 豆包：TipTap 输入框、发送按钮 (`button[aria-label="发送"]`) 与模型菜单 (快速/专家)、上传选择器适配
+  - 四个适配器：SPA `load` 事件长连接超时容错 (`tryGotoWithCheck`，仅"加载超时"继续执行)
+  - 豆包发送按钮：专家模式下拟人化/force 点击易超时，改为 JS 直接派发 `.click()`（原生 force 点击兜底）
+  - DeepSeek 输入聚焦：`safeClick` 稳定等待易 25s 超时，改为 JS `focus()`（Enter 发送不变）
+  - DeepSeek SSE 全量快照 (无 `o` 的 `response/fragments`)：按片段类型重建内容，修复短回答只出现在快照导致"回复内容为空"
+  - 豆包结果 Promise：挂吞异常 catch + 定时器可清理，修复请求早期失败后 120s 定时器触发 unhandled rejection 崩掉整个服务（崩溃循环）
+  - 豆包输入框等待预算放宽到 120s，防多实例资源争抢下冷启动首帧渲染超时
+
+### 🐳 Changed (Docker 部署)
+- 去除原 Docker Hub 镜像拉取地址 (`foxhui/webai-2api`)，镜像改由 **GHCR** (`ghcr.io/caohuihu/webto2api`) 提供
+- 重写 `.github/workflows/docker-publish.yml`：推送到 main 自动构建并推送 ghcr.io（亦可手动触发），用内置 `GITHUB_TOKEN` 登录，多架构 amd64/arm64 + gha 缓存
+- 新增 `docker-compose.ghcr.yaml`（GHCR 版本 compose）
+- `docker-compose.yaml` 镜像地址改为 ghcr
+- 更新 `README.md` / `README_EN.md` 的 Docker 段落
+
+### 📚 Docs
+- 新增 `docs/adapter-fix-guide.md`：站点适配器修复指南（调试工作流 + 6 类失效模式修复套路 + 崩溃循环清理 + 8 步 checklist + 各站选择器快照）
+
 ## [3.6.7] - 2026-04-24
 
 ### 🐛 Fixed

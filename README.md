@@ -107,18 +107,25 @@
 > - 可通过 WebUI 的虚拟显示器板块连接
 > - **WebUI 传输过程未加密, 公网环境请使用 SSH 隧道或 HTTPS**
 
+> [!NOTE]
+> 镜像由 GitHub Actions (`.github/workflows/docker-publish.yml`) 自动构建并推送到
+> **GHCR**: `ghcr.io/caohuihu/webto2api`（推送到 main 自动触发，也可在 Actions 手动触发）。
+> 拉取需先登录: `docker login ghcr.io`（GitHub 账号，或带 `read:packages` 的 PAT）。
+
 **Docker CLI 启动**
 ```bash
+docker login ghcr.io
 docker run -d --name webai-2api \
   -p 3000:3000 \
   -v "$(pwd)/data:/app/data" \
   --shm-size=2gb \
-  foxhui/webai-2api:latest
+  ghcr.io/caohuihu/webto2api:latest
 ```
 
-**Docker Compose 启动**
+**Docker Compose 启动 (GHCR 版本)**
 ```bash
-docker-compose up -d
+docker login ghcr.io
+docker compose -f docker-compose.ghcr.yaml up -d
 ```
 
 ---

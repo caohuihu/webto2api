@@ -1,0 +1,19 @@
+# Docker Compose (GHCR 版本)
+# 镜像由 .github/workflows/docker-publish.yml 自动推送到 ghcr.io/caohuihu/webto2api
+#
+# 使用:
+#   docker compose -f docker-compose.ghcr.yaml up -d
+#
+# 前置条件 (拉取 GHCR 私有镜像需要登录):
+#   docker login ghcr.io   # 用 GitHub 账号 (或 PAT with read:packages) 登录
+services:
+  webai-2api:
+    image: ghcr.io/caohuihu/webto2api:latest
+    container_name: webai-2api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"  # API + WebUI
+    volumes:
+      - ./data:/app/data  # 数据和配置持久化，config.yaml 会自动生成到此目录
+    shm_size: '2gb'
+    init: true

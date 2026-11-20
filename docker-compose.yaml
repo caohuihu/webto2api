@@ -1,6 +1,9 @@
+# 镜像由 .github/workflows/docker-publish.yml 自动构建推送到 ghcr.io/caohuihu/webto2api
+# (原 Docker Hub foxhui/webai-2api 已弃用)
+# 显式 GHCR 版本见 docker-compose.ghcr.yaml
 services:
   webai-2api:
-    image: foxhui/webai-2api:latest
+    image: ghcr.io/caohuihu/webto2api:latest
     container_name: webai-2api
     restart: unless-stopped
     ports:
