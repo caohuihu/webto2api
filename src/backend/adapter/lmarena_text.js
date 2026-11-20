@@ -13,7 +13,8 @@ import {
     normalizePageError,
     normalizeHttpError,
     waitForInput,
-    gotoWithCheck
+    gotoWithCheck,
+    tryGotoWithCheck
 } from '../utils/index.js';
 import { logger } from '../../utils/logger.js';
 
@@ -33,7 +34,9 @@ const TARGET_URL_SEARCH = 'https://arena.ai/search/direct';
 async function generate(context, prompt, imgPaths, modelId, meta = {}) {
     const { page, config } = context;
     const waitTimeout = config?.backend?.pool?.waitTimeout ?? 120000;
-    const textareaSelector = 'textarea';
+    // LMArena 页面改版后，输入框为 TipTap 富文本编辑器 (contenteditable div)。
+    // 页面上的 <textarea> 只是隐藏的 reCAPTCHA 内部元素，不可用。
+    const textareaSelector = 'div.tiptap[contenteditable="true"], div.ProseMirror[contenteditable="true"], div[contenteditable="true"]';
 
     // Worker 已验证，直接解析模型配置
     const modelConfig = manifest.models.find(m => m.id === modelId);
@@ -42,7 +45,16 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
 
     try {
         logger.info('适配器', `开启新会话... (搜索模式: ${!!search})`, meta);
-        await gotoWithCheck(page, targetUrl);
+        // LMArena SPA 的 load 事件可能因长连接不在超时内触发:
+        // 仅"页面加载超时"视为可继续 (页面实际已渲染), 其他导航错误仍抛出
+        const navResult = await tryGotoWithCheck(page, targetUrl);
+        if (navResult.error) {
+            if (/页面加载超时/.test(navResult.error)) {
+                logger.warn('适配器', '页面加载超时，继续执行 (SPA 长连接属正常现象)', meta);
+            } else {
+                throw new Error(navResult.error);
+            }
+        }
 
         // 1. 等待输入框加载
         await waitForInput(page, textareaSelector, { click: false });

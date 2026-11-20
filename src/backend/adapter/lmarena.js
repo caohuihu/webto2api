@@ -14,6 +14,7 @@ import {
     normalizeHttpError,
     waitForInput,
     gotoWithCheck,
+    tryGotoWithCheck,
     useContextDownload
 } from '../utils/index.js';
 import { logger } from '../../utils/logger.js';
@@ -100,11 +101,23 @@ function extractError(text) {
 async function generate(context, prompt, imgPaths, modelId, meta = {}) {
     const { page, config } = context;
     const waitTimeout = config?.backend?.pool?.waitTimeout ?? 120000;
-    const textareaSelector = 'textarea';
+    // LMArena 页面改版后，输入框为 TipTap 富文本编辑器 (contenteditable div)。
+    // 页面上的 <textarea> 只是隐藏的 reCAPTCHA 内部元素，不可用。
+    // 选择器策略：优先 TipTap 编辑器，回退到任意可见的 contenteditable。
+    const textareaSelector = 'div.tiptap[contenteditable="true"], div.ProseMirror[contenteditable="true"], div[contenteditable="true"]';
 
     try {
         logger.info('适配器', '开启新会话...', meta);
-        await gotoWithCheck(page, TARGET_URL);
+        // LMArena SPA 的 load 事件可能因长连接不在超时内触发:
+        // 仅"页面加载超时"视为可继续 (页面实际已渲染), 其他导航错误仍抛出
+        const navResult = await tryGotoWithCheck(page, TARGET_URL);
+        if (navResult.error) {
+            if (/页面加载超时/.test(navResult.error)) {
+                logger.warn('适配器', '页面加载超时，继续执行 (SPA 长连接属正常现象)', meta);
+            } else {
+                throw new Error(navResult.error);
+            }
+        }
 
         // 1. 等待输入框加载
         await waitForInput(page, textareaSelector, { click: true });
@@ -232,7 +245,17 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         const pageError = normalizePageError(err, meta);
         if (pageError) return pageError;
 
-        logger.error('适配器', '生成任务失败', { ...meta, error: err.message });
+        // 诊断信息：记录失败时页面实际状态，便于定位风控/登录/改版问题
+        let pageDiag = null;
+        try {
+            pageDiag = {
+                pageUrl: page.url(),
+                pageTitle: await page.title(),
+                pageText: await page.evaluate(() => document.body?.innerText?.slice(0, 300) || '')
+            };
+        } catch (e) { /* 页面可能已关闭 */ }
+
+        logger.error('适配器', '生成任务失败', { ...meta, ...pageDiag, error: err.message });
         return { error: `生成任务失败: ${err.message}` };
     } finally { }
 }

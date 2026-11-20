@@ -11,7 +11,8 @@ import {
 import {
     normalizePageError,
     waitForInput,
-    gotoWithCheck
+    gotoWithCheck,
+    tryGotoWithCheck
 } from '../utils/index.js';
 import { logger } from '../../utils/logger.js';
 
@@ -34,22 +35,36 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
     // 是否使用深度思考模式
     const useThinking = modelId === 'seed-thinking' || modelId === 'seed-pro';
 
-    // 模型 ID 到菜单项无障碍名称的正则表达式映射（兼容英文、简繁体中文）
+    // 模型 ID 到菜单项的正则映射
+    // 新版豆包模型菜单仅 快速/专家 两项 (旧版 快速/思考/专家, 英文 Fast/Think/Pro)
     const MODEL_MENU_MAP = {
-        'seed': /Fast Solves most questions|快速 适用于大部分情况|快速 適用於大部分情況/,
-        'seed-thinking': /Think Solves more complex problems|思考 擅长解决更难的问题|思考 擅長解決更難的問題/,
-        'seed-pro': /Pro Advanced Pro model|专家 研究级智能模型|專家 研究級智慧模型/
+        'seed': /快速|Fast/,
+        'seed-thinking': /专家|思考|Pro|Think/,
+        'seed-pro': /专家|Pro/
     };
 
     try {
         logger.info('适配器', '开启新会话...', meta);
-        await gotoWithCheck(page, TARGET_URL);
+        // 豆包 SPA 的 load 事件可能因长连接不在超时内触发:
+        // 仅"页面加载超时"视为可继续 (页面实际已渲染), 其他导航错误仍抛出。
+        // 这里把 load 等待从默认 20s 缩短到 8s: SPA 几乎不会在 8s 内触发 load,
+        // 但 DOM 已开始渲染, 交给下方 60s 的输入框等待兜底, 可显著减少空等。
+        const navResult = await tryGotoWithCheck(page, TARGET_URL, { timeout: 8000 });
+        if (navResult.error) {
+            if (/页面加载超时/.test(navResult.error)) {
+                logger.warn('适配器', '页面加载超时，继续执行 (SPA 长连接属正常现象)', meta);
+            } else {
+                throw new Error(navResult.error);
+            }
+        }
 
-        // 1. 等待输入框加载
-        const inputLocator = page.locator('textarea.semi-input-textarea');
-        await waitForInput(page, inputLocator, { click: false });
+        // 1. 等待输入框加载 (改版后为 TipTap 富文本编辑器, 不再是 textarea)
+        // 豆包 SPA 首屏渲染较慢, 且 goto 的 load 事件常因长连接而超时(已被容错),
+        // 此时输入框可能尚未渲染完成 → 放宽等待预算到 60s, 避免"未找到输入框"
+        const inputLocator = page.locator('div[contenteditable="true"]').first();
+        await waitForInput(page, inputLocator, { click: false, timeout: 60000 });
 
-        // 2. 选择模型
+        // 2. 选择模型 (改版后菜单项为 快速/专家, 兼容旧版 思考)
         const modelMenuName = MODEL_MENU_MAP[modelId] || MODEL_MENU_MAP['seed'];
         logger.debug('适配器', `选择模型: ${modelId} -> ${String(modelMenuName)}`, meta);
         await sleep(300, 500);
@@ -106,15 +121,15 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             page.on('response', applyUploadHandler);
 
             try {
-                // 点击上传菜单按钮（排除掉含有模型名称或带有“更多”文案的按钮）
+                // 点击上传菜单按钮（排除模型选择/项目/对话等按钮, 附件按钮无文字）
                 const uploadMenuBtn = page.locator('#input-engine-container button[aria-haspopup="menu"]')
-                    .filter({ hasNot: page.locator('text=/Fast|Think|Pro|快速|思考|专家|專家|更多/') })
+                    .filter({ hasNot: page.locator('text=/Fast|Think|Pro|Quick|快速|思考|专家|專家|更多|项目|对话|技能/') })
                     .first();
                 await safeClick(page, uploadMenuBtn, { bias: 'button' });
                 await sleep(300, 500);
 
-                // 点击上传文件选项
-                const uploadItem = page.locator('div[role="menuitem"]').filter({ hasText: /上传文件或图片|上傳檔案或圖片|Upload File or Image/ });
+                // 点击上传文件选项 (新版菜单项文案仍为 上传文件或图片)
+                const uploadItem = page.getByText(/上传文件或图片|上傳檔案或圖片|Upload File or Image/).first();
                 await uploadFilesViaChooser(page, uploadItem, imgPaths, {
                     uploadValidator: (response) => {
                         if (response.status() !== 200 || response.request().method() !== 'POST') return false;
@@ -145,16 +160,16 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         let resultText = '';
         let reasoningText = '';
         let isResolved = false;
+        let sseTimeoutId;
 
         const resultPromise = new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(() => {
+            sseTimeoutId = setTimeout(() => {
                 if (!isResolved) {
                     isResolved = true;
                     reject(new Error(`API_TIMEOUT: 响应超时 (${Math.round(waitTimeout / 1000)}秒)`));
                 }
             }, waitTimeout);
 
-            // 监听页面响应
             const handleResponse = async (response) => {
                 try {
                     const url = response.url();
@@ -174,7 +189,7 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
 
                         if (!isResolved) {
                             isResolved = true;
-                            clearTimeout(timeoutId);
+                            clearTimeout(sseTimeoutId);
                             page.off('response', handleResponse);
                             resolve();
                         }
@@ -187,11 +202,32 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             page.on('response', handleResponse);
         });
 
-        // 6. 点击发送
-        const sendBtn = page.locator('button#flow-end-msg-send');
+        // 安全网：若后续流程(点击/发送)提前失败，resultPromise 会成为无人 await 的孤儿
+        // promise，120s 后 timer 触发 reject 会造成 unhandled rejection 并直接崩掉进程。
+        // 挂一个吞掉异常的 catch 保证它永远被"已处理"，避免进程崩溃。
+        resultPromise.catch(() => { });
+
+        // 6. 点击发送 (改版后为 button[aria-label="发送"], 保留旧 id 兜底)
+        //    专家模式下, 发送按钮区域持续重渲染 (思考动画/浮层), Playwright 层级的
+        //    拟人化点击与 force 点击都容易在稳定性/后校验上超时。
+        //    策略: 用 JS 直接在按钮上派发 .click() (确定性、最快), 失败再用 Playwright 强点兜底。
+        const sendBtn = page.locator('button[aria-label="发送"], button#flow-end-msg-send').first();
         await sendBtn.waitFor({ state: 'visible', timeout: 10000 });
+        // 关掉可能残留的模型选择菜单 (避免浮层遮挡发送按钮)
+        try { await page.keyboard.press('Escape'); } catch { /* 忽略 */ }
+        await sleep(300, 500);
         logger.info('适配器', '点击发送...', meta);
-        await safeClick(page, sendBtn, { bias: 'button' });
+        const jsClick = await page.evaluate(() => {
+            const btn = document.querySelector('button[aria-label="发送"], button#flow-end-msg-send');
+            if (!btn) return { ok: false, reason: '未找到发送按钮' };
+            if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return { ok: false, reason: '按钮处于禁用态' };
+            btn.click();
+            return { ok: true };
+        }).catch((e) => ({ ok: false, reason: e.message }));
+        if (!jsClick.ok) {
+            logger.warn('适配器', `JS 点击发送失败(${jsClick.reason})，回退 Playwright 强点`, meta);
+            await sendBtn.click({ force: true, timeout: 15000 }).catch(() => { });
+        }
 
         // 7. 等待响应
         logger.info('适配器', '等待生成结果...', meta);
